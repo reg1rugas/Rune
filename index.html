@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rune</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #e9ecef;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 30px 0;
+            margin: 0;
+        }
+
+        .toolbar {
+            background-color: #ffffff;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+            max-width: 800px;
+            justify-content: center;
+        }
+
+        .tool-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            border-right: 1px solid #ccc;
+            padding-right: 15px;
+        }
+        
+        .tool-group:last-child {
+            border-right: none;
+            padding-right: 0;
+        }
+
+        input[type="color"] {
+            cursor: pointer;
+            border: none;
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            background: none;
+        }
+
+        button {
+            background-color: #f1f3f5;
+            color: #333;
+            border: 1px solid #ced4da;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background-color: #e2e6ea;
+        }
+
+        /* Active state for mode buttons */
+        button.active {
+            background-color: #4dabf7;
+            color: white;
+            border-color: #4dabf7;
+        }
+
+        /* Destructive action button */
+        #clearBtn {
+            background-color: #ff4757;
+            color: white;
+            border-color: #ff4757;
+        }
+
+        #clearBtn:hover {
+            background-color: #ff6b81;
+        }
+
+        .canvas-wrapper {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="toolbar">
+        <div class="tool-group">
+            <button id="drawModeBtn" class="active">Draw</button>
+            <button id="selectModeBtn">Select</button>
+        </div>
+        
+        <div class="tool-group">
+            <label for="colorPicker">Color:</label>
+            <input type="color" id="colorPicker" value="#000000">
+            
+            <label for="brushSize" style="margin-left: 10px;">Size:</label>
+            <input type="range" id="brushSize" min="1" max="50" value="5">
+        </div>
+
+        <div class="tool-group">
+            <button id="undoBtn">↩️ Undo</button>
+            <button id="redoBtn">↪️ Redo</button>
+            <button id="clearBtn">Clear board</button>
+        </div>
+    </div>
+
+    <div class="canvas-wrapper">
+        <canvas id="drawBoard"></canvas>
+    </div>
+
+    <script>
+        // 1. Initialize the Fabric canvas
+        const canvas = new fabric.Canvas('drawBoard', {
+            isDrawingMode: true,
+            width: 800,
+            height: 500,
+            backgroundColor: '#ffffff'
+        });
+
+        // 2. DOM Elements
+        const colorPicker = document.getElementById('colorPicker');
+        const brushSize = document.getElementById('brushSize');
+        const drawModeBtn = document.getElementById('drawModeBtn');
+        const selectModeBtn = document.getElementById('selectModeBtn');
+        const undoBtn = document.getElementById('undoBtn');
+        const redoBtn = document.getElementById('redoBtn');
+        const clearBtn = document.getElementById('clearBtn');
+
+        // Initial Brush Settings
+        canvas.freeDrawingBrush.color = colorPicker.value;
+        canvas.freeDrawingBrush.width = parseInt(brushSize.value, 10);
+
+        // --- HISTORY MANAGEMENT FOR UNDO/REDO ---
+        let history = [];
+        let historyIndex = -1;
+        let isHistoryProcessing = false; // Prevents infinite loops when loading history states
+
+        function saveHistory() {
+            if (isHistoryProcessing) return;
+            
+            // If we undo and then make a new change, discard the "future" redo states
+            if (historyIndex < history.length - 1) {
+                history = history.slice(0, historyIndex + 1);
+            }
+            
+            history.push(JSON.stringify(canvas));
+            historyIndex++;
+        }
+
+        // Save the initial blank canvas state
+        saveHistory();
+
+        // Listen for canvas changes to update history
+        canvas.on('object:added', saveHistory);
+        canvas.on('object:modified', saveHistory);
+        // Note: object:removed is intentionally omitted to avoid doubling up history logs during clear operations.
+
+        undoBtn.addEventListener('click', () => {
+            if (historyIndex > 0) {
+                historyIndex--;
+                isHistoryProcessing = true;
+                canvas.loadFromJSON(history[historyIndex], () => {
+                    canvas.renderAll();
+                    isHistoryProcessing = false;
+                });
+            }
+        });
+
+        redoBtn.addEventListener('click', () => {
+            if (historyIndex < history.length - 1) {
+                historyIndex++;
+                isHistoryProcessing = true;
+                canvas.loadFromJSON(history[historyIndex], () => {
+                    canvas.renderAll();
+                    isHistoryProcessing = false;
+                });
+            }
+        });
+
+        // --- MODES: DRAW VS SELECT ---
+        drawModeBtn.addEventListener('click', () => {
+            canvas.isDrawingMode = true;
+            drawModeBtn.classList.add('active');
+            selectModeBtn.classList.remove('active');
+            
+            // Deselect any currently active objects
+            canvas.discardActiveObject();
+            canvas.requestRenderAll();
+        });
+
+        selectModeBtn.addEventListener('click', () => {
+            canvas.isDrawingMode = false;
+            selectModeBtn.classList.add('active');
+            drawModeBtn.classList.remove('active');
+        });
+
+        // --- BRUSH SETTINGS ---
+        colorPicker.addEventListener('input', (e) => {
+            canvas.freeDrawingBrush.color = e.target.value;
+            // If in select mode and an object is selected, change its color too
+            const activeObject = canvas.getActiveObject();
+            if (activeObject && activeObject.type === 'path') {
+                activeObject.set({ stroke: e.target.value });
+                canvas.requestRenderAll();
+                saveHistory();
+            }
+        });
+
+        brushSize.addEventListener('input', (e) => {
+            canvas.freeDrawingBrush.width = parseInt(e.target.value, 10);
+            // If in select mode and an object is selected, change its thickness too
+            const activeObject = canvas.getActiveObject();
+            if (activeObject && activeObject.type === 'path') {
+                activeObject.set({ strokeWidth: parseInt(e.target.value, 10) });
+                canvas.requestRenderAll();
+                saveHistory();
+            }
+        });
+
+        // --- CLEAR CANVAS ---
+        clearBtn.addEventListener('click', () => {
+            isHistoryProcessing = true; // Pause history tracking while deleting everything
+            canvas.clear();
+            canvas.backgroundColor = '#ffffff';
+            canvas.renderAll();
+            isHistoryProcessing = false; // Resume
+            saveHistory(); // Save the new blank state
+        });
+    </script>
+</body>
+</html>
