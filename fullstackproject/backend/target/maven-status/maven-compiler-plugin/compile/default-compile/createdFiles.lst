@@ -1,0 +1,4 @@
+com\wigglypaint\backend\BackendApplication.class
+com\wigglypaint\backend\repository\DrawingRepository.class
+com\wigglypaint\backend\controller\DrawingController.class
+com\wigglypaint\backend\model\Drawing.class

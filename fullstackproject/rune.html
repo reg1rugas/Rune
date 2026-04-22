@@ -1,0 +1,1574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Wiggly Paint | Editor</title>
+    <meta name="description" content="Collaborative infinite canvas with wiggly lines and advanced drawing tools.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✏️</text></svg>">
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    
+    <style>
+        :root {
+            /* Light Theme (Default) */
+            --bg: #FDF6EC;
+            --fg: #2D3436;
+            --panel-bg: rgba(255, 255, 255, 0.7);
+            --border: rgba(0, 0, 0, 0.1);
+            --accent: #E17055;
+            --teal: #00B894;
+            --muted: #636E72;
+            --inner-border: rgba(255, 255, 255, 0.8);
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            --text: #2D3436;
+            --canvas-bg: #ffffff;
+        }
+
+        [data-theme="dark"] {
+            --bg: #1a1a1a;
+            --fg: #ffffff;
+            --panel-bg: rgba(45, 45, 45, 0.82);
+            --border: rgba(255, 255, 255, 0.12);
+            --accent: #ff7675;
+            --teal: #55efc4;
+            --muted: #b2bec3;
+            --inner-border: rgba(255, 255, 255, 0.05);
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            --text: #ffffff;
+            --canvas-bg: #2d2d2d;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Fredoka', sans-serif; }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        /* ========== MENU BAR ========== */
+        .menu-bar {
+            height: 32px;
+            background: var(--panel-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 8px;
+            z-index: 200;
+            gap: 0;
+        }
+
+        .menu-item {
+            position: relative;
+            padding: 4px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text);
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.15s;
+            user-select: none;
+        }
+        .menu-item:hover { background: rgba(0,0,0,0.08); }
+        [data-theme="dark"] .menu-item:hover { background: rgba(255,255,255,0.1); }
+
+        .menu-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            min-width: 200px;
+            background: var(--panel-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 4px 0;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+            z-index: 300;
+        }
+        .menu-item:hover > .menu-dropdown,
+        .menu-item.open > .menu-dropdown { display: block; }
+
+        .menu-action {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            font-size: 13px;
+            color: var(--text);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .menu-action:hover { background: var(--accent); color: white; }
+        .menu-action.active { background: var(--accent); color: white; font-weight: 600; }
+        .menu-action .shortcut { font-size: 11px; color: var(--muted); font-family: monospace; }
+        .menu-action:hover .shortcut { color: rgba(255,255,255,0.7); }
+        .menu-action.active .shortcut { color: rgba(255,255,255,0.7); }
+        .menu-separator { height: 1px; background: var(--border); margin: 4px 8px; }
+
+        /* ========== VERTICAL TOOLBAR ========== */
+        .toolbar-vertical {
+            background: var(--panel-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 8px 4px;
+            gap: 2px;
+            z-index: 100;
+            width: 48px;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .toolbar-vertical .ribbon-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            padding: 2px 0;
+        }
+
+        .toolbar-vertical .ribbon-divider {
+            width: 28px;
+            height: 1px;
+            background: var(--border);
+            margin: 4px 0;
+        }
+
+        .toolbar-vertical .ribbon-label {
+            font-size: 8px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: var(--muted);
+            padding: 2px 0;
+            white-space: nowrap;
+            text-align: center;
+            line-height: 1;
+        }
+
+        /* ========== LAYOUT ========== */
+        .main-container {
+            flex: 1;
+            display: flex;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            background: var(--bg);
+            overflow: hidden;
+        }
+
+        #canvas {
+            display: block;
+            background: var(--canvas-bg);
+            box-shadow: var(--shadow);
+            margin: auto;
+        }
+
+        /* ========== TOOL BUTTONS (Ribbon Style) ========== */
+        .tool-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            position: relative;
+        }
+
+        [data-theme="dark"] .tool-btn { background: transparent; }
+
+        .tool-btn svg { width: 20px; height: 20px; }
+        .tool-btn svg { transition: transform 0.15s ease; }
+        .tool-btn:hover { background: rgba(0,0,0,0.06); }
+        [data-theme="dark"] .tool-btn:hover { background: rgba(255,255,255,0.08); }
+
+        .tool-btn.active {
+            background: var(--accent);
+            color: white;
+            border-color: rgba(255,255,255,0.2);
+            box-shadow: 0 2px 8px rgba(225, 112, 85, 0.3);
+        }
+        .tool-btn.active svg { stroke: white !important; fill: white !important; }
+        .tool-btn:active { transform: scale(0.92); }
+
+        .tool-btn[data-tool="eraser"] svg { stroke: #e17055; fill: #ffb8b8; }
+        .tool-btn[data-tool="highlighter"] svg { stroke: #00b894; fill: rgba(0, 184, 148, 0.2); }
+        .tool-btn[data-tool="arrow"] svg { stroke: #2d3436; }
+
+        /* ========== TOOLBAR COLOR SWATCHES ========== */
+        .toolbar-colors {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2px;
+            padding: 2px;
+        }
+        .ribbon-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            border: 1.5px solid transparent;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .ribbon-color:hover { transform: scale(1.15); z-index: 1; }
+        .ribbon-color.active {
+            border-color: var(--fg);
+            transform: scale(1.2);
+            box-shadow: 0 0 0 1px var(--bg), 0 0 0 2px var(--fg);
+        }
+
+        /* ========== SIZE DISPLAY ========== */
+        .toolbar-size-label {
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--accent);
+            text-align: center;
+            padding: 2px 0;
+        }
+
+
+
+
+        /* Floating Components */
+        .instructions {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 8px 20px;
+            background: var(--panel-bg);
+            backdrop-filter: blur(8px);
+            border-radius: 100px;
+            border: 1px solid var(--border);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--muted);
+            z-index: 10;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+
+        .room-badge {
+            background: var(--panel-bg);
+            padding: 8px 16px;
+            border-radius: 100px;
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff7675;
+            box-shadow: 0 0 10px rgba(255, 118, 117, 0.4);
+        }
+
+        .status-dot.connected {
+            background: #55efc4;
+            box-shadow: 0 0 10px rgba(85, 239, 196, 0.4);
+        }
+
+        /* Grid Overlay */
+        .grid-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background-image: 
+                linear-gradient(var(--border) 1px, transparent 1px),
+                linear-gradient(90deg, var(--border) 1px, transparent 1px);
+            background-size: 40px 40px;
+            opacity: 0.3;
+            display: none;
+            z-index: 5;
+        }
+
+        .grid-overlay.active { display: block; }
+
+        .blob {
+            position: fixed;
+            width: 600px;
+            height: 600px;
+            background: var(--accent);
+            border-radius: 50%;
+            filter: blur(100px);
+            opacity: 0.1;
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        .divider { width: 1px; height: 32px; background: var(--border); margin: 0 12px; }
+
+        /* Animation */
+        @keyframes float {
+            0%, 100% { transform: translate(0,0); }
+            50% { transform: translate(20px, 20px); }
+        }
+
+        /* Brush Cursor */
+        .brush-cursor {
+            position: fixed;
+            pointer-events: none;
+            border: 2px solid white;
+            box-shadow: 0 0 0 1px rgba(0,0,0,0.2), inset 0 0 4px rgba(0,0,0,0.1);
+            border-radius: 50%;
+            z-index: 9999;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+        .brush-cursor.active { display: block; }
+
+        /* Remote Cursors */
+        .remote-cursor {
+            position: fixed;
+            pointer-events: none;
+            z-index: 9998;
+            transition: all 0.1s linear;
+        }
+        .remote-cursor-label {
+            position: absolute;
+            top: -24px;
+            left: 12px;
+            background: var(--accent);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-size: 10px;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Modals */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            backdrop-filter: blur(12px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s ease;
+        }
+        .modal-overlay.active { opacity: 1; pointer-events: auto; }
+        .modal-content {
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 80vh;
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            transform: scale(0.95);
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+        }
+        .modal-overlay.active .modal-content { transform: scale(1); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; }
+        .modal-title { font-size: 24px; font-weight: 700; color: var(--accent); }
+        .gallery-list { overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .gallery-item {
+            padding: 16px;
+            border-radius: 16px;
+            background: rgba(0,0,0,0.03);
+            border: 1px solid transparent;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s;
+        }
+        .gallery-item:hover { background: rgba(0,0,0,0.06); border-color: var(--accent); }
+        .help-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .shortcut-item { display: flex; justify-content: space-between; font-size: 14px; }
+        .kbd { background: var(--border); padding: 2px 8px; border-radius: 6px; font-family: monospace; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <div class="blob" style="top: -10%; left: -10%;"></div>
+    <div class="blob" style="bottom: -10%; right: -10%; background: var(--teal);"></div>
+
+    <!-- ========== MENU BAR ========== -->
+    <nav class="menu-bar">
+        <div class="menu-item">
+            File
+            <div class="menu-dropdown">
+                <div class="menu-action" id="menuNew">New Canvas <span class="shortcut">Ctrl+N</span></div>
+                <div class="menu-action" id="menuSave">Save to Gallery <span class="shortcut">Ctrl+S</span></div>
+                <div class="menu-separator"></div>
+                <div class="menu-action" id="menuUpload">Upload Image</div>
+                <div class="menu-action" id="downloadBtn">Download as PNG <span class="shortcut">Ctrl+D</span></div>
+                <div class="menu-separator"></div>
+                <div class="menu-action"><a href="index.html" style="color: inherit; text-decoration: none;">Exit to Home</a></div>
+            </div>
+        </div>
+        <div class="menu-item">
+            Edit
+            <div class="menu-dropdown">
+                <div class="menu-action" id="undoBtn">Undo <span class="shortcut">Ctrl+Z</span></div>
+                <div class="menu-action" id="redoBtn">Redo <span class="shortcut">Ctrl+Y</span></div>
+                <div class="menu-separator"></div>
+                <div class="menu-action" id="clearBtn">Clear Canvas <span class="shortcut">Del</span></div>
+            </div>
+        </div>
+        <div class="menu-item">
+            View
+            <div class="menu-dropdown">
+                <div class="menu-action" id="gridToggleBtn">Toggle Grid <span class="shortcut">G</span></div>
+                <div class="menu-action" id="themeToggle">Dark / Light Mode</div>
+                <div class="menu-separator"></div>
+                <div class="menu-action" id="galleryBtn">Open Gallery</div>
+            </div>
+        </div>
+        <div class="menu-item">
+            Options
+            <div class="menu-dropdown">
+                <div class="menu-action" id="wiggleToggleBtn">Toggle Wiggle Effect <span class="shortcut">W</span></div>
+                <div class="menu-action" id="shadowToggleBtn">Toggle Shadow/Glow <span class="shortcut">H</span></div>
+                <div class="menu-action" id="rainbowToggleBtn">Rainbow Brush <span class="shortcut">R</span></div>
+                <div class="menu-separator"></div>
+                <div class="menu-action" id="shapeFillToggle">Fill Shapes</div>
+            </div>
+        </div>
+        <div class="menu-item">
+            Help
+            <div class="menu-dropdown">
+                <div class="menu-action" id="helpBtn">Keyboard Shortcuts <span class="shortcut">?</span></div>
+                <div class="menu-separator"></div>
+                <div class="menu-action" onclick="alert('Wiggly Paint v2.0 — A collaborative infinite canvas by Salil')">About Wiggly Paint</div>
+            </div>
+        </div>
+
+        <!-- Room badge on the right side of menu bar -->
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+            <div id="roomTag" class="room-badge cursor-pointer" title="Join or Create Room" style="height: 24px; padding: 2px 10px; font-size: 11px;">
+                <div class="status-dot" id="roomStatus" style="width: 7px; height: 7px;"></div>
+                <span id="roomLabel">Local Mode</span>
+            </div>
+            <button class="tool-btn" id="shareBtn" title="Share Workspace" style="width: 24px; height: 24px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:14px; height:14px;"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
+            </button>
+        </div>
+    </nav>
+
+
+    <!-- ========== MAIN AREA ========== -->
+    <div class="main-container">
+        <!-- Vertical Tool Strip (left side) -->
+        <div class="toolbar-vertical">
+            <span class="ribbon-label">Draw</span>
+            <div class="ribbon-group">
+                <button class="tool-btn active" data-tool="pencil" title="Pencil">
+                    <svg viewBox="0 0 24 24" fill="none"><path d="M13.5 3.5l7 7m-11 11L3 21l.5-6.5L14.5 3.5l6 6-11 11z" stroke="#333" stroke-width="1.5"/><path d="M14.5 3.5l6 6-1 1-6-6 1-1z" fill="#E17055"/><path d="M3.5 14.5L3 21l6.5-.5-6-6z" fill="#333"/></svg>
+                </button>
+                <button class="tool-btn" data-tool="highlighter" title="Highlighter">
+                    <svg viewBox="0 0 24 24" fill="none"><rect x="6" y="4" width="12" height="12" rx="2" fill="#00B894" fill-opacity="0.3" stroke="#00B894" stroke-width="1.5"/><path d="M8 16l-2 4h12l-2-4" stroke="#00B894" stroke-width="1.5"/></svg>
+                </button>
+                <button class="tool-btn" data-tool="eraser" title="Eraser">
+                    <svg viewBox="0 0 24 24" fill="none"><path d="M7 21h10a2 2 0 002-2v-4a2 2 0 00-2-2H7a2 2 0 00-2 2v4a2 2 0 002 2z" fill="#FFB8B8" stroke="#E17055" stroke-width="1.5"/><path d="M5 15l4-4h8l4 4" stroke="#E17055" stroke-width="1.5"/></svg>
+                </button>
+            </div>
+
+            <div class="ribbon-divider"></div>
+
+            <span class="ribbon-label">Shape</span>
+            <div class="ribbon-group">
+                <button class="tool-btn" data-tool="line" title="Line">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5"><line x1="19" y1="5" x2="5" y2="19"/></svg>
+                </button>
+                <button class="tool-btn" data-tool="arrow" title="Arrow">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#2D3436" stroke-width="1.5"><path d="M5 19L19 5M19 5h-4M19 5v4"/></svg>
+                </button>
+                <button class="tool-btn" data-tool="rect" title="Rectangle">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                </button>
+                <button class="tool-btn" data-tool="circle" title="Circle">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5"><circle cx="12" cy="12" r="8"/></svg>
+                </button>
+                <button class="tool-btn" data-tool="triangle" title="Triangle">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#555" stroke-width="1.5"><path d="M12 4L4 20h16L12 4z"/></svg>
+                </button>
+            </div>
+
+            <div class="ribbon-divider"></div>
+
+            <span class="ribbon-label">Note</span>
+            <div class="ribbon-group">
+                <button class="tool-btn" data-tool="text" title="Text">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#2D3436" stroke-width="1.5"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
+                </button>
+                <button class="tool-btn" data-tool="sticky" title="Sticky Note">
+                    <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" fill="#FDCB6E" fill-opacity="0.8" stroke="#FDCB6E" stroke-width="1.5"/></svg>
+                </button>
+            </div>
+
+            <div class="ribbon-divider"></div>
+
+            <span class="ribbon-label">Color</span>
+            <div class="toolbar-colors" id="colorPalette">
+                <div class="ribbon-color active" style="background: #E17055" data-color="#E17055"></div>
+                <div class="ribbon-color" style="background: #00B894" data-color="#00B894"></div>
+                <div class="ribbon-color" style="background: #6C5CE7" data-color="#6C5CE7"></div>
+                <div class="ribbon-color" style="background: #0984E3" data-color="#0984E3"></div>
+                <div class="ribbon-color" style="background: #2D3436" data-color="#2D3436"></div>
+                <div class="ribbon-color" style="background: #FD79A8" data-color="#FD79A8"></div>
+                <div class="ribbon-color" style="background: #FDCB6E" data-color="#FDCB6E"></div>
+                <div class="ribbon-color" style="background: #ffffff; border: 1px solid var(--border)" data-color="#ffffff"></div>
+            </div>
+            <input type="color" id="customColor" style="width: 28px; height: 20px; border: none; cursor: pointer; background: none; padding: 0; border-radius: 3px; margin-top: 2px;">
+
+            <div class="ribbon-divider"></div>
+
+            <span class="ribbon-label">Size</span>
+            <span id="sizeLabel" class="toolbar-size-label">8px</span>
+            <input type="range" id="sizeRange" min="1" max="100" value="8" orient="vertical" style="writing-mode: vertical-lr; direction: rtl; width: 20px; height: 60px; -webkit-appearance: slider-vertical; cursor: pointer;">
+
+            <input type="file" id="fileInput" hidden accept="image/*">
+        </div>
+
+        <!-- Canvas Area -->
+        <main class="canvas-container" id="canvasContainer">
+            <div class="grid-overlay" id="gridOverlay"></div>
+            <div class="instructions" id="instructions">
+                Left-click to Draw • Right-click to Pan • Ctrl+Z to Undo
+            </div>
+            <div id="brushCursor" class="brush-cursor"></div>
+            <canvas id="canvas"></canvas>
+        </main>
+    </div>
+
+
+
+    <!-- Modals -->
+    <div id="galleryModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Saved Paintings</h2>
+                <button class="tool-btn" onclick="closeModals()">&times;</button>
+            </div>
+            <div id="galleryList" class="gallery-list">
+                <!-- Items injected here -->
+            </div>
+        </div>
+    </div>
+
+    <div id="helpModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Quick Help</h2>
+                <button class="tool-btn" onclick="closeModals()">&times;</button>
+            </div>
+            <div class="help-grid">
+                <div class="shortcut-item"><span>Undo</span><span class="kbd">Ctrl+Z</span></div>
+                <div class="shortcut-item"><span>Redo</span><span class="kbd">Ctrl+Y</span></div>
+                <div class="shortcut-item"><span>Grid</span><span class="kbd">G</span></div>
+                <div class="shortcut-item"><span>Share</span><span class="kbd">S</span></div>
+                <div class="shortcut-item"><span>Text Tool</span><span class="kbd">T</span></div>
+                <div class="shortcut-item"><span>Rainbow</span><span class="kbd">R</span></div>
+                <div class="shortcut-item"><span>Shadow</span><span class="kbd">H</span></div>
+                <div class="shortcut-item"><span>Panning</span><span class="kbd">Right-Click</span></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Constants & State
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const API_URL = 'http://192.168.1.114:8085/api/drawings';
+        
+        // App State
+        let strokes = [];           // All completed strokes
+        let redoStack = [];         // Redo history
+        let currentStroke = null;   // Currently drawing stroke
+        let isDrawing = false;
+        let isPanning = false;      // Pan state
+        let lastPanPos = { x: 0, y: 0 }; 
+        let camera = { x: 0, y: 0 }; 
+        let toolMode = 'pencil';    // pencil, eraser, highlighter, line, rect, circle, triangle, bucket
+        let currentColor = '#E17055';
+        let brushSize = 8;
+        let isWiggleEnabled = true; 
+        let isGridEnabled = false;
+        let theme = 'light';
+        let animationTime = 0;
+        let hasDrawn = false;
+        
+        // Advanced Effects State
+        let isShadowActive = false;
+        let isRainbowActive = false;
+        let hueSecret = 0; // For rainbow brush
+        
+        // Collaboration State
+        let stompClient = null;
+        let roomId = null;
+        let remoteStrokes = new Map(); 
+        let clientId = Math.random().toString(36).substring(7);
+
+        // ============================================
+        // STROKE CLASS - Enhanced for Shapes
+        // ============================================
+        
+        class Stroke {
+            constructor(color, size, tool = 'pencil') {
+                this.points = [];
+                this.color = color;
+                this.baseSize = size;
+                this.tool = tool;
+                this.opacity = 1.0; 
+                this.isEraser = (tool === 'eraser');
+                this.seed = Math.random() * 1000;
+                
+                // Advanced props
+                this.text = null;
+                this.hasShadow = isShadowActive;
+                this.isRainbow = isRainbowActive;
+                this.isFilled = isShapeFillActive;
+            }
+            
+            addPoint(x, y, pressure = 1) {
+                this.points.push({ x, y, pressure, time: Date.now() });
+            }
+            
+            getWiggleOffset(index, time) {
+                if (!isWiggleEnabled || this.tool === 'bucket') return { x: 0, y: 0 };
+                const boilInterval = 150; 
+                const boilFrame = Math.floor(time / boilInterval);
+                const wiggleAmount = this.baseSize * 0.15 + 1;
+                const noiseX = Math.sin(index * 0.5 + boilFrame + this.seed);
+                const noiseY = Math.cos(index * 0.4 + boilFrame * 1.1 + this.seed);
+                return { x: noiseX * wiggleAmount, y: noiseY * wiggleAmount };
+            }
+            
+            draw(ctx, time, isCurrent = false) {
+                if (this.points.length === 0 && !this.text) return;
+                
+                ctx.save();
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.globalAlpha = this.opacity;
+                
+                // Color logic
+                if (this.isRainbow) {
+                    const h = (time / 10 + this.seed) % 360;
+                    ctx.strokeStyle = `hsl(${h}, 80%, 55%)`;
+                    ctx.fillStyle = `hsl(${h}, 80%, 55%)`;
+                } else {
+                    ctx.strokeStyle = this.color;
+                    ctx.fillStyle = this.color;
+                }
+                
+                ctx.lineWidth = this.baseSize;
+                const dpr = window.devicePixelRatio || 1;
+                
+                if (this.hasShadow) {
+                    ctx.shadowBlur = this.baseSize * 1.5;
+                    ctx.shadowColor = this.isRainbow ? `hsl(${(time/10+this.seed)%360}, 80%, 55%)` : this.color;
+                }
+
+                if (this.isEraser) {
+                    ctx.globalCompositeOperation = 'destination-out';
+                    ctx.strokeStyle = 'rgba(0,0,0,1)'; 
+                    ctx.shadowBlur = 0;
+                }
+
+                if (this.text) {
+                    ctx.font = `bold ${this.baseSize * 4}px Fredoka`;
+                    ctx.fillText(this.text, this.points[0].x, this.points[0].y);
+                    ctx.restore();
+                    return;
+                }
+
+                const pStart = this.points[0];
+                const pEnd = this.points[this.points.length - 1];
+
+                switch (this.tool) {
+                    case 'pencil':
+                    case 'highlighter':
+                        case 'eraser':
+                        ctx.beginPath();
+                        if (this.points.length > 2) {
+                            ctx.moveTo(this.points[0].x, this.points[0].y);
+                            for (let i = 1; i < this.points.length - 2; i++) {
+                                const p1 = this.points[i];
+                                const pNext = this.points[i + 1];
+                                const w1 = (isCurrent || !isWiggleEnabled) ? {x:0,y:0} : this.getWiggleOffset(i, time);
+                                const wNext = (isCurrent || !isWiggleEnabled) ? {x:0,y:0} : this.getWiggleOffset(i+1, time);
+                                
+                                const midX = (p1.x + w1.x + pNext.x + wNext.x) / 2;
+                                const midY = (p1.y + w1.y + pNext.y + wNext.y) / 2;
+                                ctx.quadraticCurveTo(p1.x + w1.x, p1.y + w1.y, midX, midY);
+                            }
+                            // Line to last point
+                            const last = this.points[this.points.length-1];
+                            const wLast = (isCurrent || !isWiggleEnabled) ? {x:0,y:0} : this.getWiggleOffset(this.points.length-1, time);
+                            ctx.lineTo(last.x + wLast.x, last.y + wLast.y);
+                        } else if (this.points.length > 0) {
+                            ctx.moveTo(this.points[0].x, this.points[0].y);
+                            if (this.points[1]) ctx.lineTo(this.points[1].x, this.points[1].y);
+                        }
+                        ctx.stroke();
+                        break;
+
+                    case 'sticky':
+                        const w = 150, h = 150;
+                        ctx.fillStyle = '#FDCB6E';
+                        ctx.fillRect(pStart.x, pStart.y, w, h);
+                        ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+                        ctx.strokeRect(pStart.x, pStart.y, w, h);
+                        ctx.fillStyle = '#2D3436';
+                        ctx.font = '14px Fredoka';
+                        if(this.text) {
+                            ctx.fillText(this.text, pStart.x + 10, pStart.y + 30);
+                        }
+                        break;
+                    case 'line':
+                        ctx.beginPath();
+                        ctx.moveTo(pStart.x, pStart.y);
+                        ctx.lineTo(pEnd.x, pEnd.y);
+                        ctx.stroke();
+                        break;
+                    case 'arrow':
+                        ctx.beginPath();
+                        ctx.moveTo(pStart.x, pStart.y);
+                        ctx.lineTo(pEnd.x, pEnd.y);
+                        const angle = Math.atan2(pEnd.y - pStart.y, pEnd.x - pStart.x);
+                        const headLen = 10;
+                        ctx.lineTo(pEnd.x - headLen * Math.cos(angle - Math.PI / 6), pEnd.y - headLen * Math.sin(angle - Math.PI / 6));
+                        ctx.moveTo(pEnd.x, pEnd.y);
+                        ctx.lineTo(pEnd.x - headLen * Math.cos(angle + Math.PI / 6), pEnd.y - headLen * Math.sin(angle + Math.PI / 6));
+                        ctx.stroke();
+                        break;
+                    case 'rect':
+                        if (this.isFilled) ctx.fillRect(pStart.x, pStart.y, pEnd.x - pStart.x, pEnd.y - pStart.y);
+                        else ctx.strokeRect(pStart.x, pStart.y, pEnd.x - pStart.x, pEnd.y - pStart.y);
+                        break;
+                    case 'circle':
+                        const radius = Math.sqrt(Math.pow(pEnd.x - pStart.x, 2) + Math.pow(pEnd.y - pStart.y, 2));
+                        ctx.beginPath();
+                        ctx.arc(pStart.x, pStart.y, radius, 0, Math.PI * 2);
+                        if (this.isFilled) ctx.fill();
+                        else ctx.stroke();
+                        break;
+                    case 'triangle':
+                        ctx.beginPath();
+                        ctx.moveTo(pStart.x + (pEnd.x - pStart.x) / 2, pStart.y);
+                        ctx.lineTo(pStart.x, pEnd.y);
+                        ctx.lineTo(pEnd.x, pEnd.y);
+                        ctx.closePath();
+                        if (this.isFilled) ctx.fill();
+                        else ctx.stroke();
+                        break;
+                }
+                ctx.restore();
+            }
+        }
+        
+        // ============================================
+        // CANVAS CORE
+        // ============================================
+        
+        function resizeCanvas() {
+            const container = document.getElementById('canvasContainer');
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) {
+                // Container not sized yet, retry
+                requestAnimationFrame(resizeCanvas);
+                return;
+            }
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            canvas.style.width = rect.width + 'px';
+            canvas.style.height = rect.height + 'px';
+            ctx.scale(dpr, dpr);
+        }
+        
+        // Defer canvas initialization until DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                setTimeout(() => {
+                    resizeCanvas();
+                    requestAnimationFrame(mainLoop); // Start animation loop
+                }, 100);
+            });
+        } else {
+            setTimeout(() => {
+                resizeCanvas();
+                requestAnimationFrame(mainLoop); // Start animation loop
+            }, 100);
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        function getPointerPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top
+            };
+        }
+        
+        function startDrawing(e) {
+            if (e.target.closest('.side-panel') || e.target.closest('.top-bar')) return;
+            e.preventDefault();
+
+            // Right-click for PAN
+            if (e.button === 2) {
+                isPanning = true;
+                lastPanPos = { x: e.clientX, y: e.clientY };
+                canvas.style.cursor = 'grabbing';
+                return;
+            }
+
+            if (e.button !== 0) return; // Left only for draw
+
+            isDrawing = true;
+            if (!hasDrawn) {
+                hasDrawn = true;
+                const instructions = document.getElementById('instructions');
+                if (instructions) instructions.style.opacity = '0';
+            }
+
+            const pos = getPointerPos(e);
+            const worldX = pos.x - camera.x;
+            const worldY = pos.y - camera.y;
+
+            if (toolMode === 'sticky') {
+                const txt = prompt("Sticky thoughts:", "Top Priority!");
+                if (txt) {
+                    const stickyStroke = new Stroke(currentColor, brushSize, 'sticky');
+                    stickyStroke.text = txt;
+                    stickyStroke.addPoint(worldX, worldY);
+                    strokes.push(stickyStroke);
+                    broadcastDrawEvent('DRAW_START', worldX, worldY, 1.0, currentColor, 1.0, false, 'sticky', txt);
+                    broadcastDrawEvent('DRAW_END', worldX, worldY, 1.0, currentColor, 1.0, false, 'sticky', txt);
+                }
+                return;
+            }
+
+            if (toolMode === 'text') {
+                const txt = prompt("Enter text:", "Wiggly Paint!");
+                if (txt) {
+                    const textStroke = new Stroke(currentColor, brushSize, 'text');
+                    textStroke.text = txt;
+                    textStroke.addPoint(worldX, worldY);
+                    strokes.push(textStroke);
+                    broadcastDrawEvent('DRAW_START', worldX, worldY, 1.0, currentColor, 1.0, false, 'text');
+                }
+                return;
+            }
+
+            currentStroke = new Stroke(currentColor, brushSize, toolMode);
+            if (toolMode === 'highlighter') currentStroke.opacity = 0.4;
+            
+            currentStroke.addPoint(worldX, worldY);
+            
+            broadcastDrawEvent('DRAW_START', worldX, worldY, 1.0, currentStroke.color, currentStroke.opacity, currentStroke.isEraser, currentStroke.tool);
+        }
+
+        function draw(e) {
+            if (isPanning) {
+                const dx = e.clientX - lastPanPos.x;
+                const dy = e.clientY - lastPanPos.y;
+                camera.x += dx;
+                camera.y += dy;
+                lastPanPos = { x: e.clientX, y: e.clientY };
+                updateParallax();
+                return;
+            }
+
+            if (!isDrawing || !currentStroke) return;
+
+            const pos = getPointerPos(e);
+            const worldX = pos.x - camera.x;
+            const worldY = pos.y - camera.y;
+
+            if (['pencil', 'eraser', 'highlighter'].includes(toolMode)) {
+                currentStroke.addPoint(worldX, worldY);
+            } else {
+                // For shapes, we replace the second point to act as a preview
+                if (currentStroke.points.length > 1) {
+                    currentStroke.points[1] = { x: worldX, y: worldY, pressure: 1, time: Date.now() };
+                } else {
+                    currentStroke.addPoint(worldX, worldY);
+                }
+            }
+            
+            broadcastDrawEvent('DRAW_MOVE', worldX, worldY, 1.0);
+        }
+
+        function stopDrawing() {
+            if (isPanning) {
+                isPanning = false;
+                canvas.style.cursor = 'crosshair';
+                return;
+            }
+
+            if (!isDrawing) return;
+            isDrawing = false;
+
+            if (currentStroke) {
+                strokes.push(currentStroke);
+                redoStack = []; // Clear redo on new action
+                broadcastDrawEvent('DRAW_END', 0, 0, 0);
+                currentStroke = null;
+            }
+        }
+
+        // Prevent context menu to allow right-click drag
+        window.addEventListener('contextmenu', e => e.preventDefault());
+
+        function updateParallax() {
+            const blobs = document.querySelectorAll('.blob');
+            blobs.forEach((b, i) => {
+                const f = (i + 1) * 0.15;
+                b.style.transform = `translate(${camera.x * f}px, ${camera.y * f}px)`;
+            });
+        }
+
+        // ============================================
+        // FLOOD FILL (Scanline Algorithm)
+        // ============================================
+
+        function floodFill(startX, startY, fillColor) {
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            
+            drawToContext(tempCtx, 0);
+            
+            const dpr = window.devicePixelRatio || 1;
+            const screenX = Math.round((startX + camera.x) * dpr);
+            const screenY = Math.round((startY + camera.y) * dpr);
+            
+            if (screenX < 0 || screenX >= canvas.width || screenY < 0 || screenY >= canvas.height) return;
+
+            const imageData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
+            const pixels = imageData.data;
+            
+            const targetPos = (screenY * canvas.width + screenX) * 4;
+            const targetColor = [pixels[targetPos], pixels[targetPos+1], pixels[targetPos+2], pixels[targetPos+3]];
+            
+            const fillRgb = hexToRgb(fillColor);
+            if (colorsMatch(targetColor, [fillRgb.r, fillRgb.g, fillRgb.b, 255])) return;
+
+            const fillStroke = new Stroke(fillColor, 1, 'bucket');
+            fillStroke.points = [{x: startX, y: startY}];
+            strokes.push(fillStroke);
+            
+            broadcastDrawEvent('DRAW_START', startX, startY, 1.0, fillColor, 1.0, false, 'bucket');
+        }
+
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : {r:0,g:0,b:0};
+        }
+
+        function colorsMatch(c1, c2) {
+            return Math.abs(c1[0] - c2[0]) < 5 && 
+                   Math.abs(c1[1] - c2[1]) < 5 && 
+                   Math.abs(c1[2] - c2[2]) < 5;
+        }
+
+        // ============================================
+        // REAL-TIME COLLABORATION LOGIC
+        // ============================================
+
+        function connectToWebSocket(id) {
+            roomId = id;
+            const socket = new SockJS('http://192.168.1.114:8085/ws-drawing');
+            stompClient = Stomp.over(socket);
+            stompClient.debug = null;
+
+            stompClient.connect({}, function (frame) {
+                const roomStatus = document.getElementById('roomStatus');
+                const roomLabel = document.getElementById('roomLabel');
+                if (roomStatus) roomStatus.classList.add('connected');
+                if (roomLabel) roomLabel.textContent = `Room: ${roomId}`;
+                window.location.hash = roomId;
+
+                // 1. Request History Sync
+                stompClient.send(`/app/draw/${roomId}/sync`, {}, clientId);
+
+                // 2. Subscribe to History
+                stompClient.subscribe(`/topic/room/${roomId}/sync/${clientId}`, function (message) {
+                    const history = JSON.parse(message.body);
+                    history.forEach(msg => handleRemoteDrawing(msg));
+                });
+
+                // 3. Subscribe to Real-time events
+                stompClient.subscribe(`/topic/room/${roomId}`, function (message) {
+                    const data = JSON.parse(message.body);
+                    if (data.senderId !== clientId) handleRemoteDrawing(data);
+                });
+            }, function (error) {
+                console.error("WS Error:", error);
+                const roomStatus = document.getElementById('roomStatus');
+                if (roomStatus) {
+                    roomStatus.classList.remove('connected');
+                    roomStatus.classList.add('disconnected');
+                }
+            });
+        }
+
+        function broadcastDrawEvent(type, x, y, pressure, forcedColor, forcedOpacity, isEraser, tool, text, imageData) {
+            if (!stompClient || !stompClient.connected || !roomId) return;
+
+            const msg = {
+                roomId: roomId,
+                senderId: clientId,
+                type: type,
+                x: x,
+                y: y,
+                pressure: pressure,
+                color: forcedColor || currentColor,
+                size: brushSize,
+                opacity: forcedOpacity || (currentStroke ? currentStroke.opacity : 1.0),
+                isEraser: isEraser || (currentStroke ? currentStroke.isEraser : false),
+                tool: tool || toolMode,
+                seed: currentStroke ? currentStroke.seed : null,
+                text: text || (currentStroke ? currentStroke.text : null),
+                imageData: imageData || (currentStroke ? currentStroke.imageData : null),
+                isFilled: currentStroke ? currentStroke.isFilled : isShapeFillActive,
+                hasShadow: currentStroke ? currentStroke.hasShadow : isShadowActive,
+                isRainbow: currentStroke ? currentStroke.isRainbow : isRainbowActive
+            };
+
+            stompClient.send(`/app/draw/${roomId}`, {}, JSON.stringify(msg));
+        }
+
+        function handleRemoteDrawing(data) {
+            switch (data.type) {
+                case 'DRAW_START':
+                    const stroke = new Stroke(data.color, data.size, data.tool);
+                    stroke.opacity = data.opacity || 1.0;
+                    stroke.isEraser = data.isEraser || false;
+                    stroke.seed = data.seed;
+                    stroke.text = data.text;
+                    stroke.isFilled = data.isFilled || false;
+                    stroke.hasShadow = data.hasShadow;
+                    stroke.isRainbow = data.isRainbow;
+                    stroke.addPoint(data.x, data.y, data.pressure);
+                    
+                    if (data.tool === 'image' && data.imageData) {
+                        const img = new Image();
+                        img.onload = () => {
+                            stroke.image = img;
+                            stroke.draw = function(c) {
+                                if (this.image) c.drawImage(this.image, this.points[0].x, this.points[0].y);
+                            };
+                        };
+                        img.src = data.imageData;
+                    }
+                    
+                    remoteStrokes.set(data.senderId, stroke);
+                    updateRemoteCursor(data.senderId, data.x, data.y, data.tool);
+                    break;
+                case 'DRAW_MOVE':
+                    updateRemoteCursor(data.senderId, data.x, data.y, data.tool);
+                    const active = remoteStrokes.get(data.senderId);
+                    if (active) {
+                        if (['pencil', 'eraser', 'highlighter'].includes(active.tool)) {
+                            active.addPoint(data.x, data.y, data.pressure);
+                        } else {
+                            if (active.points.length > 1) active.points[1] = {x: data.x, y: data.y, pressure: 1, time: Date.now()};
+                            else active.addPoint(data.x, data.y, data.pressure);
+                        }
+                    }
+                    break;
+                case 'DRAW_END':
+                    const final = remoteStrokes.get(data.senderId);
+                    if (final) {
+                        strokes.push(final);
+                        remoteStrokes.delete(data.senderId);
+                    }
+                    break;
+                case 'CLEAR':
+                    strokes = [];
+                    remoteStrokes.clear();
+                    break;
+                case 'TOOL_SELECT':
+                    updateRemoteCursor(data.senderId, data.x, data.y, data.tool);
+                    break;
+            }
+        }
+
+        const remoteCursors = new Map();
+        function updateRemoteCursor(id, worldX, worldY, tool) {
+            let cursor = remoteCursors.get(id);
+            if (!cursor) {
+                cursor = document.createElement('div');
+                cursor.className = 'remote-cursor';
+                cursor.innerHTML = `
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                        <path d="M5 3l14 9-14 9V3z" fill="var(--accent)"/>
+                    </svg>
+                    <div class="remote-cursor-label">
+                        <span class="sender-name">Other</span>
+                    </div>
+                `;
+                document.body.appendChild(cursor);
+                remoteCursors.set(id, cursor);
+            }
+            
+            // Convert world to screen
+            const x = (worldX + camera.x);
+            const y = (worldY + camera.y);
+            cursor.style.transform = `translate(${x}px, ${y}px)`;
+        }
+
+        // Initialize Room
+        function initRoom() {
+            const hash = window.location.hash.substring(1);
+            if (hash) connectToWebSocket(hash);
+            else connectToWebSocket(Math.random().toString(36).substring(2, 8));
+        }
+
+        const wiggleToggleBtn = document.getElementById('wiggleToggleBtn');
+        if (wiggleToggleBtn) {
+            wiggleToggleBtn.addEventListener('click', () => {
+                isWiggleEnabled = !isWiggleEnabled;
+                wiggleToggleBtn.classList.toggle('active', isWiggleEnabled);
+            });
+        }
+
+        const roomTag = document.getElementById('roomTag');
+        if (roomTag) {
+            roomTag.addEventListener('click', () => {
+                const nextRoom = prompt("Join or Create Room Code:", window.location.hash.substring(1));
+                if (nextRoom) {
+                    window.location.hash = nextRoom;
+                    location.reload();
+                }
+            });
+        }
+
+        initRoom();
+
+        // Modal Logic
+        function closeModals() {
+            document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('active'));
+        }
+
+        document.getElementById('helpBtn').addEventListener('click', () => {
+            document.getElementById('helpModal').classList.add('active');
+        });
+
+        document.getElementById('galleryBtn').addEventListener('click', () => {
+            document.getElementById('galleryModal').classList.add('active');
+            fetchGalleries();
+        });
+
+        // Close on background click
+        document.querySelectorAll('.modal-overlay').forEach(m => {
+            m.addEventListener('click', (e) => {
+                if(e.target === m) closeModals();
+            });
+        });
+
+        async function fetchGalleries() {
+            const list = document.getElementById('galleryList');
+            list.innerHTML = '<p style="text-align:center; opacity:0.5;">Fetching your wonders...</p>';
+            try {
+                const response = await fetch(API_URL);
+                const drawings = await response.json();
+                if (drawings.length === 0) {
+                    list.innerHTML = '<p style="text-align:center; opacity:0.5;">No saved paintings yet.</p>';
+                    return;
+                }
+                list.innerHTML = '';
+                drawings.forEach(d => {
+                    const item = document.createElement('div');
+                    item.className = 'gallery-item';
+                    item.innerHTML = `
+                        <div>
+                            <div style="font-weight:700;">${d.name}</div>
+                            <div style="font-size:10px; opacity:0.6;">${new Date(d.createdAt).toLocaleString()}</div>
+                        </div>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    `;
+                    item.onclick = () => loadDrawing(d.id);
+                    list.appendChild(item);
+                });
+            } catch (err) {
+                list.innerHTML = '<p style="text-align:center; color:var(--accent);">Failed to load gallery.</p>';
+            }
+        }
+
+        async function loadDrawing(id) {
+            try {
+                const response = await fetch(`${API_URL}/${id}`);
+                const data = await response.json();
+                const strokeData = JSON.parse(data.strokeData);
+                
+                // Clear and Load
+                strokes = strokeData.map(s => {
+                    const st = new Stroke(s.color, s.baseSize, s.tool);
+                    st.points = s.points;
+                    st.seed = s.seed;
+                    return st;
+                });
+                
+                closeModals();
+                alert(`Loaded: ${data.name}`);
+            } catch (err) {
+                alert("Error loading drawing.");
+            }
+        }
+
+        // Share Link Logic
+        const shareBtn = document.getElementById('shareBtn');
+        if (shareBtn) {
+            shareBtn.addEventListener('click', () => {
+                const url = window.location.href;
+                navigator.clipboard.writeText(url).then(() => {
+                    shareBtn.classList.add('active');
+                    const originalTitle = shareBtn.title;
+                    shareBtn.title = "Link Copied!";
+                    setTimeout(() => {
+                        shareBtn.classList.remove('active');
+                        shareBtn.title = originalTitle;
+                    }, 2000);
+                    alert("Share Link Copied to Clipboard!\n\nSend this link to anyone you want to draw with.");
+                }).catch(err => {
+                    console.error('Failed to copy: ', err);
+                });
+            });
+        }
+        
+        // ============================================
+        // ACTIONS (UNDO/REDO/CLEAR/SAVE)
+        // ============================================
+
+        function undo() {
+            if (strokes.length > 0) {
+                const last = strokes.pop();
+                redoStack.push(last);
+            }
+        }
+
+        function redo() {
+            if (redoStack.length > 0) {
+                const next = redoStack.pop();
+                strokes.push(next);
+            }
+        }
+
+        function clearCanvas() {
+            if (confirm("Clear Entire Canvas for everyone?")) {
+                strokes = [];
+                redoStack = [];
+                camera = { x: 0, y: 0 };
+                updateParallax();
+                stompClient.send(`/app/draw/${roomId}`, {}, JSON.stringify({
+                    roomId: roomId,
+                    senderId: clientId,
+                    type: 'CLEAR'
+                }));
+            }
+        }
+
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : { r: 0, g: 0, b: 0 };
+        }
+
+        async function saveDrawing() {
+            if (strokes.length === 0) return;
+            const name = prompt("Name your wiggly work:", "Untitled Wiggle");
+            if (!name) return;
+
+            const drawingData = {
+                name: name,
+                strokeData: JSON.stringify(strokes.map(s => ({
+                    points: s.points,
+                    color: s.color,
+                    baseSize: s.baseSize,
+                    seed: s.seed,
+                    tool: s.tool
+                })))
+            };
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(drawingData)
+                });
+                if (response.ok) alert("Saved to gallery!");
+                else throw new Error();
+            } catch (err) {
+                const link = document.createElement('a');
+                link.download = `${name}.png`;
+                link.href = canvas.toDataURL();
+                link.click();
+            }
+        }
+
+        function setTool(mode) {
+            toolMode = mode;
+            document.querySelectorAll('.tool-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tool === mode);
+            });
+            
+            // Broadcast Tool Change
+            broadcastDrawEvent('TOOL_SELECT', 0, 0, 0, currentColor, 1.0, false, mode);
+        }
+
+        // ============================================
+        // RENDERING ENGINE
+        // ============================================
+
+        function drawToContext(targetCtx, time) {
+            const dpr = window.devicePixelRatio || 1;
+            targetCtx.clearRect(0, 0, targetCtx.canvas.width, targetCtx.canvas.height);
+            targetCtx.save();
+            targetCtx.translate(camera.x, camera.y);
+            
+            // Draw all completed strokes
+            strokes.forEach(s => s.draw(targetCtx, time));
+            
+            // Draw remote active strokes
+            remoteStrokes.forEach(s => s.draw(targetCtx, time));
+            
+            // Draw current active stroke
+            if (currentStroke) currentStroke.draw(targetCtx, time, true);
+            
+            targetCtx.restore();
+        }
+
+        function mainLoop(time) {
+            drawToContext(ctx, time);
+            
+            // Cursor Preview Update
+            const bCursor = document.getElementById('brushCursor');
+            if (bCursor) {
+                bCursor.style.width = brushSize + 'px';
+                bCursor.style.height = brushSize + 'px';
+                if (isRainbowActive) {
+                    bCursor.style.borderColor = `hsl(${time / 10 % 360}, 80%, 50%)`;
+                    bCursor.style.boxShadow = `0 0 10px hsl(${time / 10 % 360}, 80%, 50%)`;
+                } else {
+                    bCursor.style.borderColor = currentColor;
+                    bCursor.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.2)';
+                }
+            }
+            
+            requestAnimationFrame(mainLoop);
+        }
+
+        // ============================================
+        // UI LISTENERS & TOOL HOOKS
+        // ============================================
+
+        // Tool Selection (ribbon buttons)
+        document.querySelectorAll('[data-tool]').forEach(btn => {
+            btn.addEventListener('click', () => setTool(btn.dataset.tool));
+        });
+
+        // Color Selection (ribbon color swatches)
+        document.querySelectorAll('.ribbon-color').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.ribbon-color').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentColor = btn.dataset.color;
+            });
+        });
+
+        document.getElementById('customColor').addEventListener('input', (e) => {
+            currentColor = e.target.value;
+            document.querySelectorAll('.ribbon-color').forEach(b => b.classList.remove('active'));
+        });
+
+        // Size slider
+        const sizeRange = document.getElementById('sizeRange');
+        const sizeLabel = document.getElementById('sizeLabel');
+        sizeRange.addEventListener('input', (e) => {
+            brushSize = parseInt(e.target.value);
+            sizeLabel.textContent = `${brushSize}px`;
+        });
+
+        // Menu bar actions
+        document.getElementById('undoBtn').addEventListener('click', undo);
+        document.getElementById('redoBtn').addEventListener('click', redo);
+        document.getElementById('clearBtn').addEventListener('click', clearCanvas);
+
+        // Helper to update menu toggle visual state
+        function updateMenuToggle(id, isActive) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            let text = el.childNodes[0]; // Assuming text is first child
+            if (text.nodeType === 3) {
+                let baseText = text.nodeValue.replace('✓ ', '');
+                text.nodeValue = (isActive ? '✓ ' : '') + baseText;
+            }
+        }
+
+        // Initialize toggle states
+        updateMenuToggle('gridToggleBtn', isGridEnabled);
+        updateMenuToggle('wiggleToggleBtn', true); // Wiggle is default true via getWiggleOffset
+
+        document.getElementById('gridToggleBtn').addEventListener('click', () => {
+            isGridEnabled = !isGridEnabled;
+            document.getElementById('gridOverlay').classList.toggle('active', isGridEnabled);
+            updateMenuToggle('gridToggleBtn', isGridEnabled);
+        });
+
+        document.getElementById('themeToggle').addEventListener('click', () => {
+            theme = theme === 'light' ? 'dark' : 'light';
+            document.body.setAttribute('data-theme', theme);
+        });
+
+        document.getElementById('shadowToggleBtn').addEventListener('click', () => {
+            isShadowActive = !isShadowActive;
+            updateMenuToggle('shadowToggleBtn', isShadowActive);
+        });
+
+        document.getElementById('rainbowToggleBtn').addEventListener('click', () => {
+            isRainbowActive = !isRainbowActive;
+            updateMenuToggle('rainbowToggleBtn', isRainbowActive);
+        });
+
+        let isShapeFillActive = false;
+        document.getElementById('shapeFillToggle').addEventListener('click', () => {
+            isShapeFillActive = !isShapeFillActive;
+            updateMenuToggle('shapeFillToggle', isShapeFillActive);
+        });
+        
+        document.getElementById('downloadBtn').addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'wiggly-masterpiece.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        });
+
+        // Menu: File actions
+        const menuNewBtn = document.getElementById('menuNew');
+        if (menuNewBtn) menuNewBtn.addEventListener('click', clearCanvas);
+        
+        const menuSaveBtn = document.getElementById('menuSave');
+        if (menuSaveBtn) menuSaveBtn.addEventListener('click', saveDrawing);
+        
+        const menuUploadBtn = document.getElementById('menuUpload');
+        if (menuUploadBtn) menuUploadBtn.addEventListener('click', () => document.getElementById('fileInput').click());
+
+        // Image Upload
+        const fileInput = document.getElementById('fileInput');
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const imgStroke = new Stroke('#000', 1, 'image');
+                    imgStroke.image = img;
+                    imgStroke.points = [{x: -camera.x + 100, y: -camera.y + 100}];
+                    imgStroke.draw = function(c) {
+                        if (this.image) c.drawImage(this.image, this.points[0].x, this.points[0].y);
+                    };
+                    strokes.push(imgStroke);
+                    broadcastDrawEvent('DRAW_START', imgStroke.points[0].x, imgStroke.points[0].y, 1.0, '#000', 1.0, false, 'image', null, event.target.result);
+                    broadcastDrawEvent('DRAW_END', imgStroke.points[0].x, imgStroke.points[0].y, 1.0, '#000', 1.0, false, 'image', null, event.target.result);
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // Keyboard Shortcuts
+        window.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); }
+            if (e.ctrlKey && e.key === 'y') { e.preventDefault(); redo(); }
+            if (e.key === 'g') { e.preventDefault(); document.getElementById('gridToggleBtn').click(); }
+            if (e.key === 's') { e.preventDefault(); document.getElementById('shareBtn')?.click(); }
+            if (e.key === 't') { e.preventDefault(); document.querySelector('[data-tool="text"]').click(); }
+            if (e.key === 'r') { e.preventDefault(); document.getElementById('rainbowToggleBtn').click(); }
+            if (e.key === 'h') { e.preventDefault(); document.getElementById('shadowToggleBtn').click(); }
+            if (e.key === 'w') { e.preventDefault(); document.getElementById('wiggleToggleBtn').click(); }
+            if (e.key === '?') { e.preventDefault(); document.getElementById('helpBtn').click(); }
+            if (e.key === 'Delete') { e.preventDefault(); clearCanvas(); }
+        });
+
+        // Mouse Bindings
+        canvas.addEventListener('mousedown', startDrawing);
+        window.addEventListener('mousemove', (e) => {
+            draw(e);
+            
+            // Cursor Follower
+            const bCursor = document.getElementById('brushCursor');
+            if (bCursor) {
+                bCursor.style.left = e.clientX + 'px';
+                bCursor.style.top = e.clientY + 'px';
+                
+                // Show only over canvas
+                const overCanvas = e.target === canvas || e.target.closest('.canvas-container');
+                bCursor.classList.toggle('active', overCanvas && !isPanning);
+            }
+        });
+        window.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseenter', () => document.getElementById('brushCursor')?.classList.add('active'));
+        canvas.addEventListener('mouseleave', () => document.getElementById('brushCursor')?.classList.remove('active'));
+
+        // Touch Bindings
+        canvas.addEventListener('touchstart', (e) => startDrawing(e), {passive: false});
+        window.addEventListener('touchmove', (e) => draw(e), {passive: false});
+        window.addEventListener('touchend', stopDrawing);
+
+
+    </script>
+</body>
+</html>
